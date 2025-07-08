@@ -1,0 +1,61 @@
+---
+
+- 
+  name: Installing wordpress using ansible
+  hosts: web
+  strategy: free
+  become: yes
+  tasks:
+    - name: Installing packages
+      apt: name={{ item }} state=present update_cache=yes  
+      with_items:
+        - nginx
+        - mariadb-server
+        - php
+        - php-mysql
+        - unzip
+      when: ansible_facts['os_family'] == "Debian"
+
+
+    - name: Installing packages
+      yum: name={{ item }} state=present update_cache=yes
+      with_items:
+        - mariadb105-server
+        - php8.2
+        - php8.2-mysqlnd
+        - nginx
+        - php8.2-fpm
+        - unzip
+      when: ansible_facts['os_family'] == "RedHat"
+
+
+    - name: Start services
+      service: name={{ item }} state=started enabled=yes
+      become: yes
+      with_items:
+        - nginx
+        - mysql
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Start services
+      service: name={{ item }} state=started enabled=yes
+      become: yes
+      with_items:
+        - nginx
+        - mariadb
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Get remote file
+      become: yes
+      get_url:
+        url: https://wordpress.org/latest.zip
+        dest: /var/www/html/
+      register: download_result
+
+    - name: Unzip Archieve
+      become: yes
+      unarchive:
+        src: "{{ download_result.dest }}"
+        dest: /var/www/html/
+        remote_src: yes
+        

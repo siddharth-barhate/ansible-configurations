@@ -1,0 +1,32 @@
+# Byte-compiled / compiled files
+__pycache__/
+
+# Secrets and sensitive files
+*.vault_pass
+*.secret
+*.key
+*.pem
+
+# Ansible-related temporary files
+*.retry
+*.log
+
+# SSH keys
+*.pub
+*.priv
+*.key
+.ssh/
+
+# Editor & OS files
+*.swp
+*.swo
+*.bak
+*.tmp
+.DS_Store
+.vscode/
+.idea/
+
+# Python virtual environments
+.venv/
+env/
+venv/
