@@ -1,40 +1,43 @@
 ---
 
 - 
-  name: Installing wordpress using ansible
+  name: Installing lampstack using ansible
   hosts: web
   strategy: free
-  become: yes
   tasks:
     - name: Installing packages
-      apt: name={{ item }} state=present update_cache=yes  
+      apt: name={{ item }} state=present update_cache=yes 
+      become: yes
       with_items:
         - nginx
         - mariadb-server
-        - php
+        - php8.3
         - php-mysql
         - unzip
+        - php-fpm
+        - python3-pip
+        - python3-pymysql
       when: ansible_facts['os_family'] == "Debian"
 
 
     - name: Installing packages
       yum: name={{ item }} state=present update_cache=yes
+      become: yes
       with_items:
         - mariadb105-server
-        - php8.2
-        - php8.2-mysqlnd
+        - php8.3
+        - php8.3-mysqlnd
         - nginx
-        - php8.2-fpm
+        - php8.3-fpm
         - unzip
       when: ansible_facts['os_family'] == "RedHat"
-
 
     - name: Start services
       service: name={{ item }} state=started enabled=yes
       become: yes
       with_items:
         - nginx
-        - mysql
+        - mariadb
       when: ansible_facts['os_family'] == "Debian"
 
     - name: Start services
@@ -45,17 +48,137 @@
         - mariadb
       when: ansible_facts['os_family'] == "RedHat"
 
+    - name: Create wordpress group
+      group:
+        name: wordpress
+        state: present
+      become: yes
+
+
+    - name: Add wordpress user
+      become: yes
+      user:
+        name: wordpress
+        group: wordpress
+        shell: /bin/bash
+        create_home: yes
+
+    - name: Add nginx user to wordpress group
+      user:
+        name: nginx
+        groups: wordpress
+        append: yes
+      become: yes
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Add nginx user to wordpress group
+      user:
+        name: www-data
+        groups: wordpress
+        append: yes
+      become: yes
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      become: yes
+
     - name: Get remote file
       become: yes
+      become_user: wordpress
       get_url:
         url: https://wordpress.org/latest.zip
         dest: /var/www/html/
-      register: download_result
+      register: download_result_debian
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Get remote file
+      become: yes
+      become_user: wordpress
+      get_url:
+        url: https://wordpress.org/latest.zip
+        dest: /var/www/html/
+      register: download_result_redhat
+      when: ansible_facts['os_family'] == "RedHat"
+
 
     - name: Unzip Archieve
       become: yes
+      become_user: wordpress
       unarchive:
-        src: "{{ download_result.dest }}"
+        src: "{{ download_result_debian.dest }}"
         dest: /var/www/html/
         remote_src: yes
-        
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Unzip Archieve
+      become: yes
+      become_user: wordpress
+      unarchive:
+        src: "{{ download_result_redhat.dest }}"
+        dest: /var/www/html/
+        remote_src: yes
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Copy Nginx Configuration file
+      become: yes
+      template:
+        src: templates/nginx.template
+        dest: /etc/nginx/conf.d/app.conf
+      vars:
+        php_fpm_socket: /var/run/php-fpm/wordpress.sock
+      when: ansible_facts['os_family'] == "RedHat"
+      notify: reload nginx
+
+    - name: Copy Nginx Configuration file
+      become: yes
+      template:
+        src: templates/nginx.template
+        dest: /etc/nginx/conf.d/app.conf
+      vars:
+        php_fpm_socket: /var/run/php/wordpress.sock
+      when: ansible_facts['os_family'] == "Debian"
+      notify: reload nginx
+
+    - name: Copy Php-Fpm Configuration file
+      become: yes
+      template:
+        src: templates/php-fpm.template
+        dest: /etc/php-fpm.d/wordpress.conf
+      vars:
+        php_fpm_socket: /var/run/php-fpm/wordpress.sock
+        user: wordpress
+      when: ansible_facts['os_family'] == "RedHat"
+      notify: reload php-fpm-redhat
+
+    - name: Copy Php Configuration file
+      become: yes
+      template:
+        src: templates/php-fpm.template
+        dest: /etc/php/8.3/fpm/pool.d/wordpress.conf
+      vars:
+        php_fpm_socket: /var/run/php/wordpress.sock
+        user: wordpress
+      when: ansible_facts['os_family'] == "Debian"
+      notify: reload php-fpm-ubuntu
+
+  handlers:
+    - name: reload nginx
+      systemd:
+        name: nginx
+        state: reloaded
+      become: yes
+
+    - name: reload php-fpm-ubuntu
+      systemd:
+        name: php8.3-fpm
+        state: restarted
+      become: yes
+
+    - name: reload php-fpm-redhat
+      systemd:
+        name: php-fpm
+        state: restarted
+      become: yes
