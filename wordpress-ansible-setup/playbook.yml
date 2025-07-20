@@ -4,6 +4,8 @@
   name: Installing lampstack using ansible
   hosts: web
   strategy: free
+  vars_files:
+    - variables.yml
   tasks:
     - name: Installing packages
       apt: name={{ item }} state=present update_cache=yes 
@@ -19,7 +21,6 @@
         - python3-pymysql
       when: ansible_facts['os_family'] == "Debian"
 
-
     - name: Installing packages
       yum: name={{ item }} state=present update_cache=yes
       become: yes
@@ -30,7 +31,21 @@
         - nginx
         - php8.3-fpm
         - unzip
+        - python3-pip
       when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Installing pip
+      become: yes
+      pip:
+        name: PyMySQL
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Installing pip
+      become: yes
+      pip:
+        name: PyMySQL
+        extra_args: --break-system-packages
+      when: ansible_facts['os_family'] == "Debian"
 
     - name: Start services
       service: name={{ item }} state=started enabled=yes
@@ -48,12 +63,56 @@
         - mariadb
       when: ansible_facts['os_family'] == "RedHat"
 
+    - name: Set the root password
+      ignore_errors: true
+      become: yes
+      mysql_user:
+        name: root
+        password: "{{mysql_root_password}}"
+        login_unix_socket: "{{ mysql_login_unix_socket_redhat }}"
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Set the root password
+      ignore_errors: true
+      become: yes
+      mysql_user:
+        name: root
+        password: "{{mysql_root_password}}"
+        login_unix_socket: "{{ mysql_login_unix_socket_debian }}"
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Create a new database with name 'wordpress'
+      become: yes
+      community.mysql.mysql_db:
+        name: "{{mysql_db}}"
+        state: present
+        login_user: root
+        login_password: "{{mysql_root_password}}"
+
+    - name: "removing anonymous users"
+      mysql_user:
+        login_user: "root"
+        login_password: "{{mysql_root_password}}"
+        name: ""
+        password: ""
+        host_all: true
+        state: absent
+
+    - name: "creating user"
+      mysql_user:
+        login_user: "root"
+        login_password: "{{mysql_root_password}}"
+        name: "{{wp_mysql_user}}"
+        password: "{{wp_mysql_password}}"
+        state: present
+        host: "%"
+        priv: "{{mysql_db}}.*:ALL"
+
     - name: Create wordpress group
       group:
         name: wordpress
         state: present
       become: yes
-
 
     - name: Add wordpress user
       become: yes
@@ -85,6 +144,12 @@
         state: absent
       become: yes
 
+    - name: Add write permission for others
+      become: yes
+      ansible.builtin.file:
+        path: /var/www/html
+        mode: o+w
+
     - name: Get remote file
       become: yes
       become_user: wordpress
@@ -102,7 +167,6 @@
         dest: /var/www/html/
       register: download_result_redhat
       when: ansible_facts['os_family'] == "RedHat"
-
 
     - name: Unzip Archieve
       become: yes
@@ -163,6 +227,14 @@
         user: wordpress
       when: ansible_facts['os_family'] == "Debian"
       notify: reload php-fpm-ubuntu
+
+    - name: "setting up wp-config"
+      become: yes
+      template:
+        src: templates/wp-config.php.template
+        dest: "/var/www/html/wordpress/wp-config.php"
+        owner: "wordpress"
+        group: "wordpress"
 
   handlers:
     - name: reload nginx
